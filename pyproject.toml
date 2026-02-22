@@ -21,6 +21,9 @@ classifiers = [
 
 dependencies = [
     "requests>=2.20",
+
+    # GUI/game dependency for GoogleDinosaur game
+    "pygame>=2.1",
 ]
 
 [project.optional-dependencies]
