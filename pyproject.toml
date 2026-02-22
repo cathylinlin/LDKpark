@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "LDKpark"               # 在 PyPI 上的名字
 version = "1.0.0"
 authors = [
-    {name = "Your Name", email = "bluejam001@163.com"},
+    {name = "LDK", email = "bluejam001@163.com"},
 ]
 description = "A small and fun package"
 readme = "README.md"
@@ -28,4 +28,5 @@ dev = ["pytest", "twine", "build"]
 
 
 [project.scripts]
-mytool = "your_pkg.core:main_cli"
+mytool = "LDKpark.core:main_cli"
+
