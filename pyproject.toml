@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools >= 61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "LDKpark"               # 在 PyPI 上的名字
+version = "1.0.0"
+authors = [
+    {name = "Your Name", email = "bluejam001@163.com"},
+]
+description = "A small and fun package"
+readme = "README.md"
+requires-python = ">=3.8"
+license = "MIT"
+license-files = ["LICENSE"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+
+
+dependencies = [
+    "requests>=2.20",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "twine", "build"]
+
+
+[project.scripts]
+mytool = "your_pkg.core:main_cli"
