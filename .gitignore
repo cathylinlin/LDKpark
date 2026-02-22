@@ -1,0 +1,24 @@
+# Virtual environments
+.venv/
+venv/
+
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Packaging
+build/
+dist/
+*.egg-info/
+
+# Editor config
+.vscode/
+.idea/
+
+# pytest
+.pytest_cache/
+
+# OS files
+.DS_Store
+thumbs.db
