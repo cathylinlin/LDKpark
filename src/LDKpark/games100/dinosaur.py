@@ -4,6 +4,7 @@
     python -m LDKpark.games100.dinosaur
 
 按 空格 或 上箭头 跳跃，按 Escape 退出。
+
 """
 import sys
 import random

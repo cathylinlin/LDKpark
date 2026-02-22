@@ -25,23 +25,27 @@ from LDKpark.games100 import dinosaur
 python -m LDKpark.games100.dinosaur  # 在命令行运行小游戏
 ```
 
-### Git 开发规则（针对本仓库）
+**依赖**:
+- `pygame`：用于运行 `Google Dinosaur` 小游戏（已在 `pyproject.toml` 中声明）。
+- `tkinter`：仅 `minesweeper` 需要，某些 Linux 发行版需要额外安装系统包（例如 `sudo apt install python3-tk`）。
 
-- 分支：新的功能请基于 `GoogleDinosaur` 分支开发（或创建以 `GoogleDinosaur` 为基准的新分支）。
-- 提交信息：使用简洁前缀，如 `feat(game): 添加 dinosaur 小游戏`、`fix: 修复 bug`。
-- 提交前：运行 `git status`、`pytest`（如果适用）并确保无破坏性更改。
+**以函数方式运行（推荐）**:
+- 在代码中以函数调用运行游戏，避免在导入包时加载 GUI 库：
 
-示例：
-```bash
-# 切换到基准分支
-git checkout GoogleDinosaur
+```python
+from LDKpark.games100 import run_dinosaur
+run_dinosaur()
 
-# 创建功能分支并切换
-git checkout -b feat/dinosaur
-
-# 添加修改
-git add .
-git commit -m "feat(game): add google dinosaur minimal game (pygame)"
-git push --set-upstream origin feat/dinosaur
+from LDKpark.games100 import run_minesweeper
+run_minesweeper()
 ```
+
+**PR 提交要求（简单规范）**:
+- 基于 `GoogleDinosaur` 分支创建功能分支，例如 `feat/dinosaur`。
+- 在提交信息中使用前缀（如 `feat(game):`、`fix:`）。
+- 在 PR 描述中写明变更要点、依赖变动（如新增 `pygame`）、如何运行与验证步骤。
+- 若引入新的系统依赖（例如 `tkinter` 在 Linux 上），在 PR 中注明并给出安装命令。
+- 在将改动 push 到远程前，确保本地 `pytest`（若有）通过，或说明为何不适用。
+
+
 
