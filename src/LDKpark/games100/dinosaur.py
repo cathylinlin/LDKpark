@@ -3,15 +3,15 @@
 运行：
 	python -m LDKpark.games100.dinosaur
 
-按 空格 或 上箭头 跳跃，按 `s` 蹲下，按 `m` 切换音乐，按 Escape 退出。
+按 空格 或 上箭头 跳跃，按 `s` 蹲下，按 Escape 退出。
 
 功能：使用 `assets/dinosaur/` 中的用户素材（奔跑 GIF、跳跃图、蹲下图、飞行物、障碍、音乐），实现：
 - 碰撞后显示 Game Over，5 秒自动退出或按空格重开。
 - 记录死亡次数；当死亡次数 > 2 时尝试显示 `deadmoretime.jpg`。
 """
-import sys
 import random
 import os
+import glob
 import pygame
 
 
@@ -28,14 +28,16 @@ class Dino:
 		self.crouching = False
 		self.width = 44
 		self.height = 44
+		# for smooth crouch animation
+		self.current_height = float(self.height)
+		self.target_height = float(self.height)
 
 	def rect(self):
-		h = self.height
-		if self.crouching:
-			h = int(self.height * 0.6)
+		h = int(self.current_height)
 		return pygame.Rect(self.x, self.y - h, self.width, h)
 
 	def update(self, dt):
+		# physics for jump
 		if self.jumping:
 			self.vy += 1200 * dt
 			self.y += self.vy * dt
@@ -44,6 +46,11 @@ class Dino:
 				self.vy = 0
 				self.jumping = False
 
+		# smooth crouch height interpolation (linear lerp)
+		# target_height already set by crouch()
+		lerp_speed = 8.0  # higher = faster transition
+		self.current_height += (self.target_height - self.current_height) * min(1.0, lerp_speed * dt)
+
 	def jump(self):
 		if not self.jumping and not self.crouching:
 			self.vy = -520
@@ -51,12 +58,147 @@ class Dino:
 
 	def crouch(self, on: bool):
 		self.crouching = bool(on)
+		# set target height for smooth transition
+		if self.crouching:
+			self.target_height = float(self.height * 0.6)
+		else:
+			self.target_height = float(self.height)
+
+
+class Animation:
+	def __init__(self, frames, fps=12):
+		self.frames = frames or []
+		self.index = 0
+		self.timer = 0.0
+		self.frame_time = 1.0 / max(1, fps)
+
+	def reset(self):
+		self.index = 0
+		self.timer = 0.0
+
+	def update(self, dt):
+		if not self.frames:
+			return
+		self.timer += dt
+		while self.timer >= self.frame_time:
+			self.timer -= self.frame_time
+			self.index = (self.index + 1) % len(self.frames)
+
+	def current(self):
+		if not self.frames:
+			return None
+		return self.frames[self.index]
+
+
+def prepare_surface(surface):
+	if surface is None:
+		return None
+	# apply a color key from the top-left pixel if no alpha
+	if surface.get_alpha() is None:
+		colorkey = surface.get_at((0, 0))
+		surface.set_colorkey(colorkey)
+	# crop to bounding rect to reduce empty background
+	try:
+		rect = surface.get_bounding_rect()
+		surface = surface.subsurface(rect).copy()
+	except Exception:
+		pass
+	return surface
+
+
+def load_frames_from_file(path, default_fps=12):
+	frames = []
+	fps = default_fps
+	try:
+		from PIL import Image, ImageSequence
+		im = Image.open(path)
+		durations = []
+		for frame in ImageSequence.Iterator(im):
+			durations.append(frame.info.get("duration", 100))
+			frame = frame.convert("RGBA")
+			data = frame.tobytes()
+			surf = pygame.image.fromstring(data, frame.size, "RGBA").convert_alpha()
+			frames.append(surf)
+		if durations:
+			avg_ms = sum(durations) / max(1, len(durations))
+			fps = max(1, int(1000 / max(1, avg_ms)))
+	except Exception:
+		# fallback: single frame
+		try:
+			frames = [pygame.image.load(path).convert_alpha()]
+		except Exception:
+			frames = []
+	return frames, fps
+
+
+def load_frames_from_glob(patterns):
+	frames = []
+	for p in sorted(patterns):
+		try:
+			frames.append(pygame.image.load(p).convert_alpha())
+		except Exception:
+			pass
+	return frames
+
+
+def _evenly_pick(seq, k):
+	if k <= 0 or not seq:
+		return []
+	n = len(seq)
+	if n <= k:
+		return list(seq)
+	if k == 1:
+		return [seq[n // 2]]
+	idxs = [int(round(i * (n - 1) / (k - 1))) for i in range(k)]
+	# de-duplicate indices while preserving order
+	seen = set()
+	uniq_idxs = []
+	for idx in idxs:
+		if idx not in seen:
+			seen.add(idx)
+			uniq_idxs.append(idx)
+	# If rounding caused duplicates, fill missing indices from left to right.
+	if len(uniq_idxs) < k:
+		for idx in range(n):
+			if idx in seen:
+				continue
+			seen.add(idx)
+			uniq_idxs.append(idx)
+			if len(uniq_idxs) >= k:
+				break
+	return [seq[i] for i in uniq_idxs]
+
+
+def select_frames_start_middle_end(frames, start_count, middle_count, end_count):
+	frames = list(frames or [])
+	n = len(frames)
+	if n == 0:
+		return []
+	third = max(1, n // 3)
+	start_seg = frames[:third]
+	mid_seg = frames[third:max(third + 1, 2 * third)]
+	end_seg = frames[max(2 * third, 0):]
+	selected = []
+	selected.extend(_evenly_pick(start_seg, start_count))
+	selected.extend(_evenly_pick(mid_seg, middle_count))
+	selected.extend(_evenly_pick(end_seg, end_count))
+	# final de-dup preserving order
+	uniq = []
+	seen_ids = set()
+	for f in selected:
+		fid = id(f)
+		if fid in seen_ids:
+			continue
+		seen_ids.add(fid)
+		uniq.append(f)
+	return uniq
 
 
 class Obstacle:
-	def __init__(self, x, kind='ground'):
+	def __init__(self, x, kind='ground', image=None):
 		self.x = x
 		self.kind = kind
+		self.image = image
 		if kind == 'ground':
 			self.w = random.randint(30, 60)
 			self.h = random.randint(30, 60)
@@ -68,10 +210,11 @@ class Obstacle:
 			self.y = GROUND_Y - random.randint(80, 130)
 
 	def rect(self):
+		pad = 6
 		if self.kind == 'ground':
-			return pygame.Rect(self.x, GROUND_Y - self.h, self.w, self.h)
+			return pygame.Rect(self.x + pad, GROUND_Y - self.h + pad, self.w - pad * 2, self.h - pad * 2)
 		else:
-			return pygame.Rect(self.x, self.y - self.h, self.w, self.h)
+			return pygame.Rect(self.x + pad, self.y - self.h + pad, self.w - pad * 2, self.h - pad * 2)
 
 	def update(self, speed, dt):
 		self.x -= speed * dt
@@ -92,25 +235,38 @@ def run():
 		except Exception:
 			return None
 
-	assets['run_gif'] = try_load(os.path.join(base, 'sheets', 'taff-begining.gif'))
-	assets['jump_img'] = try_load(os.path.join(base, 'sheets', 'mdtaff.jpg'))
-	assets['crouch_img'] = try_load(os.path.join(base, 'face', 'taff-laugh.jpg'))
-	assets['obstacle_img'] = try_load(os.path.join(base, 'obstacles', 'xianrenzhang.png'))
-	assets['flying_img'] = try_load(os.path.join(base, 'flying', 'chucaoflying.png'))
-	dead_image = try_load(os.path.join(base, 'deadmoretime.jpg'))
+	# run animation: prefer extracted frames; fallback to gif or static
+	frame_patterns = glob.glob(os.path.join(base, 'frames', 'run_*.png')) + glob.glob(os.path.join(base, 'frames', 'frame_*.png'))
+	run_frames = load_frames_from_glob(frame_patterns)
+	run_fps = 12
+	if not run_frames:
+		gif_path = os.path.join(base, 'sheets', 'taff-begining.gif')
+		if os.path.exists(gif_path):
+			run_frames, run_fps = load_frames_from_file(gif_path, default_fps=12)
+	# if too many frames, sample from start/middle/end to preserve visible changes
+	max_frames = 30
+	if len(run_frames) > max_frames:
+		base_count = max_frames // 3
+		start_count = base_count
+		middle_count = base_count
+		end_count = max_frames - start_count - middle_count
+		run_frames = select_frames_start_middle_end(run_frames, start_count, middle_count, end_count)
+	assets['run_anim'] = Animation([prepare_surface(f) for f in run_frames], fps=run_fps)
 
-	# music
-	music_on = False
-	try:
-		pygame.mixer.init()
-		music_path = os.path.join(base, 'sfx', 'taff-begining.track-0.m4a')
-		if os.path.exists(music_path):
-			pygame.mixer.music.load(music_path)
-			pygame.mixer.music.set_volume(0.6)
-			pygame.mixer.music.play(-1)
-			music_on = True
-	except Exception:
-		music_on = False
+	# jump and crouch animations (support animated jpg/gif if present)
+	jump_path = os.path.join(base, 'sheets', 'mdtaff.jpg')
+	jump_frames, jump_fps = load_frames_from_file(jump_path, default_fps=12)
+	assets['jump_anim'] = Animation([prepare_surface(f) for f in jump_frames], fps=jump_fps)
+
+	crouch_path = os.path.join(base, 'face', 'taff-laugh.jpg')
+	crouch_frames, crouch_fps = load_frames_from_file(crouch_path, default_fps=12)
+	assets['crouch_anim'] = Animation([prepare_surface(f) for f in crouch_frames], fps=crouch_fps)
+
+	assets['obstacle_img'] = prepare_surface(try_load(os.path.join(base, 'obstacles', 'xianrenzhang.png')))
+	assets['flying_img'] = prepare_surface(try_load(os.path.join(base, 'flying', 'chucaoflying.png')))
+	dead_image = prepare_surface(try_load(os.path.join(base, 'deadmoretime.jpg')))
+
+	# music removed by request
 
 	dino = Dino()
 	obstacles = []
@@ -134,13 +290,6 @@ def run():
 					dino.jump()
 				elif event.key == pygame.K_s:
 					dino.crouch(True)
-				elif event.key == pygame.K_m:
-					# toggle music pause/unpause
-					if music_on and pygame.mixer.get_init():
-						if pygame.mixer.music.get_busy():
-							pygame.mixer.music.pause()
-						else:
-							pygame.mixer.music.unpause()
 				elif event.key == pygame.K_ESCAPE:
 					running = False
 			elif event.type == pygame.KEYUP:
@@ -158,7 +307,10 @@ def run():
 					kind = 'ground' if random.random() < 0.75 else 'flying'
 				else:
 					kind = 'ground' if random.random() < 0.7 else 'flying'
-				obstacles.append(Obstacle(WIDTH + 40, kind=kind))
+				if kind == 'ground':
+					obstacles.append(Obstacle(WIDTH + 40, kind=kind, image=assets.get('obstacle_img')))
+				else:
+					obstacles.append(Obstacle(WIDTH + 40, kind=kind, image=assets.get('flying_img')))
 				last_spawn_type = kind
 
 			dino.update(dt)
@@ -183,13 +335,13 @@ def run():
 
 		# draw obstacles with images when available
 		for ob in obstacles:
-			if ob.kind == 'ground' and assets.get('obstacle_img'):
-				img = pygame.transform.smoothscale(assets['obstacle_img'], (ob.w, ob.h))
+			if ob.kind == 'ground' and ob.image is not None:
+				img = pygame.transform.smoothscale(ob.image, (ob.w, ob.h))
 				img_rect = img.get_rect()
 				img_rect.midbottom = (int(ob.x + ob.w/2), GROUND_Y)
 				screen.blit(img, img_rect)
-			elif ob.kind == 'flying' and assets.get('flying_img'):
-				img = pygame.transform.smoothscale(assets['flying_img'], (ob.w, ob.h))
+			elif ob.kind == 'flying' and ob.image is not None:
+				img = pygame.transform.smoothscale(ob.image, (ob.w, ob.h))
 				img_rect = img.get_rect()
 				img_rect.midbottom = (int(ob.x + ob.w/2), ob.y)
 				screen.blit(img, img_rect)
@@ -205,18 +357,45 @@ def run():
 		else:
 			# base body
 			pygame.draw.rect(screen, (40, 40, 40), dino.rect())
+			# run animation frames if available and on ground
+			run_anim = assets.get('run_anim')
+			if not dino.jumping and not dino.crouching and run_anim:
+				run_anim.update(dt)
+				frame = run_anim.current()
+				if frame is not None:
+					f = pygame.transform.smoothscale(frame, (dino.width, int(dino.current_height)))
+					fr = f.get_rect()
+					fr.midbottom = (dino.x + dino.width // 2, dino.y)
+					screen.blit(f, fr)
+			else:
+				if run_anim:
+					run_anim.reset()
 			# jumping overlay
-			if dino.jumping and assets.get('jump_img'):
-				j = pygame.transform.smoothscale(assets['jump_img'], (dino.width, dino.height))
-				jr = j.get_rect()
-				jr.midbottom = (dino.x + dino.width // 2, dino.y)
-				screen.blit(j, jr)
+			jump_anim = assets.get('jump_anim')
+			if dino.jumping and jump_anim:
+				jump_anim.update(dt)
+				j = jump_anim.current()
+				if j is not None:
+					j = pygame.transform.smoothscale(j, (dino.width, dino.height))
+					jr = j.get_rect()
+					jr.midbottom = (dino.x + dino.width // 2, dino.y)
+					screen.blit(j, jr)
+			else:
+				if jump_anim:
+					jump_anim.reset()
 			# crouch overlay
-			if dino.crouching and assets.get('crouch_img'):
-				c = pygame.transform.smoothscale(assets['crouch_img'], (dino.width, int(dino.height*0.6)))
-				cr = c.get_rect()
-				cr.midbottom = (dino.x + dino.width // 2, dino.y)
-				screen.blit(c, cr)
+			crouch_anim = assets.get('crouch_anim')
+			if dino.crouching and crouch_anim:
+				crouch_anim.update(dt)
+				c = crouch_anim.current()
+				if c is not None:
+					c = pygame.transform.smoothscale(c, (dino.width, int(dino.current_height)))
+					cr = c.get_rect()
+					cr.midbottom = (dino.x + dino.width // 2, dino.y)
+					screen.blit(c, cr)
+			else:
+				if crouch_anim:
+					crouch_anim.reset()
 
 		text = font.render(f"Score: {int(score)}", True, (10, 10, 10))
 		screen.blit(text, (10, 10))
