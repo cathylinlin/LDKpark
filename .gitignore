@@ -34,9 +34,11 @@ htmlcov/
 # logs
 *.log
 
+# local helper scripts (do not commit)
+scripts/
+
 # OS files
 .DS_Store
 thumbs.db
 
-#sciptes
-.scripts/
+

@@ -36,6 +36,9 @@ TARGET_FPS = 60
 JUMP_VY = -520          # 起跳初速度（越小越“跳得高”，负数向上）
 GRAVITY = 1200          # 重力加速度（越大越“下落快”）
 
+# 蹲跳：按住 S 蹲下时仍可跳跃（倍率>1 会跳得更高；设为 1.0 表示仅“允许蹲下起跳”）
+CROUCH_JUMP_MULTIPLIER = 1.08
+
 # 蹲下（高度变化）
 CROUCH_HEIGHT_RATIO = 0.6   # 蹲下时高度占站立高度比例
 CROUCH_LERP_SPEED = 8.0     # 蹲下/起立的插值速度（越大越快）
@@ -92,10 +95,16 @@ class Dino:
 		self.current_height += (self.target_height - self.current_height) * min(1.0, CROUCH_LERP_SPEED * dt)
 
 	def jump(self):
-		"""触发跳跃（空中或蹲下时不能二次起跳）。"""
-		if not self.jumping and not self.crouching:
-			self.vy = JUMP_VY
-			self.jumping = True
+		"""触发跳跃。
+
+		- 空中不能二次起跳
+		- 支持“蹲跳”：按住 S 蹲下时也可以跳
+		"""
+		if self.jumping:
+			return
+		mult = CROUCH_JUMP_MULTIPLIER if self.crouching else 1.0
+		self.vy = float(JUMP_VY) * float(mult)
+		self.jumping = True
 
 	def crouch(self, on: bool):
 		"""切换蹲下状态（on=True 蹲下；False 起立）。"""
