@@ -27,17 +27,14 @@ python -m LDKpark.games100.dinosaur  # 在命令行运行小游戏
 
 **依赖**:
 - `pygame`：用于运行 `Google Dinosaur` 小游戏（已在 `pyproject.toml` 中声明）。
-- `tkinter`：仅 `minesweeper` 需要，某些 Linux 发行版需要额外安装系统包（例如 `sudo apt install python3-tk`）。
-
-**以函数方式运行（推荐）**:
 - 在代码中以函数调用运行游戏，避免在导入包时加载 GUI 库：
 
 ```python
-from LDKpark.games100 import run_dinosaur
-run_dinosaur()
+from LDKpark.games100 import dinosaur, minesweeper
+dinosaur.run()  # 运行恐龙小游戏
 
-from LDKpark.games100 import run_minesweeper
-run_minesweeper()
+minesweeper.run()  # 开始游戏：扫雷
+minesweeper.close()  # 结束游戏
 ```
 
 **PR 提交要求（简单规范）**:
