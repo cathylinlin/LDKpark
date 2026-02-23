@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "LDKpark"
-version = "1.1.0"
+version = "1.2.0"
 authors = [
     {name = "LDK", email = "bluejam001@163.com"},
 ]
@@ -21,6 +21,7 @@ classifiers = [
 
 dependencies = [
     "requests>=2.20",
+    "pygame"
 ]
 
 [project.optional-dependencies]
@@ -29,3 +30,4 @@ dev = ["pytest", "twine", "build"]
 
 [project.scripts]
 mytool = "LDKpark.core:main_cli"
+
