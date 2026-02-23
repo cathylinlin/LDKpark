@@ -5,21 +5,60 @@
 
 按 空格 或 上箭头 跳跃，按 `s` 蹲下，按 Escape 退出。
 
-功能：使用 `assets/dinosaur/` 中的用户素材（奔跑 GIF、跳跃图、蹲下图、飞行物、障碍、音乐），实现：
-- 碰撞后显示 Game Over，5 秒自动退出或按空格重开。
+功能：使用 `assets/dinosaur/` 中的用户素材（奔跑 GIF、跳跃图、蹲下图、飞行物、障碍），实现：
+- 碰撞后显示 Game Over，5 秒自动退出或按 R 重开。
 - 记录死亡次数；当死亡次数 > 2 时尝试显示 `deadmoretime.jpg`。
 """
+
+from __future__ import annotations
+
 import random
 import os
 import glob
+from typing import Optional
 import pygame
 
 
+# =====================
+# 可调参数（节奏 / 物理 / 生成）
+# =====================
+
+# 窗口大小
 WIDTH, HEIGHT = 1000, 300
+
+# 地面基准线（角色与地面障碍的“脚底”y 坐标）
 GROUND_Y = 220
+
+# 目标帧率（clock.tick 使用）
+TARGET_FPS = 60
+
+# 跳跃物理
+JUMP_VY = -520          # 起跳初速度（越小越“跳得高”，负数向上）
+GRAVITY = 1200          # 重力加速度（越大越“下落快”）
+
+# 蹲下（高度变化）
+CROUCH_HEIGHT_RATIO = 0.6   # 蹲下时高度占站立高度比例
+CROUCH_LERP_SPEED = 8.0     # 蹲下/起立的插值速度（越大越快）
+
+# 游戏节奏（速度/生成间隔）
+SPEED_BASE = 480            # 初始地面速度（像素/秒）
+SPEED_PER_SCORE = 3         # 分数每 +1，速度额外增加多少
+
+SPAWN_FACTOR_MIN = 0.55     # 生成间隔缩放下限（防止快到不可玩）
+SPAWN_FACTOR_PER_SCORE = 0.003  # 分数越高，生成越密集的程度
+SPAWN_INTERVAL_MIN = 0.7    # 基础最短生成间隔（秒）
+SPAWN_INTERVAL_MAX = 1.2    # 基础最长生成间隔（秒）
+
+# 动画帧（奔跑）
+MAX_RUN_FRAMES = 30         # 奔跑帧最多使用多少张（避免帧太多导致加载慢）
+
+# 空中按 S 蹲下时的绘制偏移（越大越“更高”）
+AIR_CROUCH_Y_OFFSET = 12
 
 
 class Dino:
+	"""恐龙玩家对象：管理跳跃/蹲下状态以及碰撞盒。"""
+
 	def __init__(self):
 		self.x = 80
 		self.y = GROUND_Y
@@ -33,13 +72,15 @@ class Dino:
 		self.target_height = float(self.height)
 
 	def rect(self):
+		"""当前碰撞矩形（基于平滑高度 current_height）。"""
 		h = int(self.current_height)
 		return pygame.Rect(self.x, self.y - h, self.width, h)
 
 	def update(self, dt):
+		"""更新物理状态（dt 为秒）。"""
 		# physics for jump
 		if self.jumping:
-			self.vy += 1200 * dt
+			self.vy += GRAVITY * dt
 			self.y += self.vy * dt
 			if self.y >= GROUND_Y:
 				self.y = GROUND_Y
@@ -48,24 +89,27 @@ class Dino:
 
 		# smooth crouch height interpolation (linear lerp)
 		# target_height already set by crouch()
-		lerp_speed = 8.0  # higher = faster transition
-		self.current_height += (self.target_height - self.current_height) * min(1.0, lerp_speed * dt)
+		self.current_height += (self.target_height - self.current_height) * min(1.0, CROUCH_LERP_SPEED * dt)
 
 	def jump(self):
+		"""触发跳跃（空中或蹲下时不能二次起跳）。"""
 		if not self.jumping and not self.crouching:
-			self.vy = -520
+			self.vy = JUMP_VY
 			self.jumping = True
 
 	def crouch(self, on: bool):
+		"""切换蹲下状态（on=True 蹲下；False 起立）。"""
 		self.crouching = bool(on)
 		# set target height for smooth transition
 		if self.crouching:
-			self.target_height = float(self.height * 0.6)
+			self.target_height = float(self.height * CROUCH_HEIGHT_RATIO)
 		else:
 			self.target_height = float(self.height)
 
 
 class Animation:
+	"""简单帧动画：按 fps 播放 Surface 列表。"""
+
 	def __init__(self, frames, fps=12):
 		self.frames = frames or []
 		self.index = 0
@@ -73,10 +117,12 @@ class Animation:
 		self.frame_time = 1.0 / max(1, fps)
 
 	def reset(self):
+		"""重置到第 0 帧，常用于状态切换。"""
 		self.index = 0
 		self.timer = 0.0
 
 	def update(self, dt):
+		"""推进动画（dt 为秒）。"""
 		if not self.frames:
 			return
 		self.timer += dt
@@ -85,18 +131,32 @@ class Animation:
 			self.index = (self.index + 1) % len(self.frames)
 
 	def current(self):
+		"""返回当前帧 Surface；无帧时返回 None。"""
 		if not self.frames:
 			return None
 		return self.frames[self.index]
 
 
 def prepare_surface(surface):
+	"""对素材 Surface 做“尽力而为”的预处理：
+
+	- 若无 per-pixel alpha，则尝试用左上角像素设为 colorkey（去背景）
+	- 使用 bounding_rect 裁剪空白边缘（减少碰撞误差/缩放浪费）
+	"""
 	if surface is None:
 		return None
-	# apply a color key from the top-left pixel if no alpha
-	if surface.get_alpha() is None:
-		colorkey = surface.get_at((0, 0))
-		surface.set_colorkey(colorkey)
+	# apply a color key from the top-left pixel only when there is no per-pixel alpha
+	# (avoid breaking PNGs that already have transparency)
+	try:
+		has_srcalpha = bool(surface.get_flags() & pygame.SRCALPHA)
+	except Exception:
+		has_srcalpha = False
+	if not has_srcalpha:
+		try:
+			colorkey = surface.get_at((0, 0))
+			surface.set_colorkey(colorkey)
+		except Exception:
+			pass
 	# crop to bounding rect to reduce empty background
 	try:
 		rect = surface.get_bounding_rect()
@@ -107,6 +167,11 @@ def prepare_surface(surface):
 
 
 def load_frames_from_file(path, default_fps=12):
+	"""从单文件读取帧动画。
+
+	优先尝试 Pillow 读取 GIF 等多帧文件；失败则回退为单帧图片。
+	返回 (frames, fps)。
+	"""
 	frames = []
 	fps = default_fps
 	try:
@@ -132,6 +197,7 @@ def load_frames_from_file(path, default_fps=12):
 
 
 def load_frames_from_glob(patterns):
+	"""按 glob 路径列表加载帧序列（加载失败的文件会被跳过）。"""
 	frames = []
 	for p in sorted(patterns):
 		try:
@@ -142,6 +208,7 @@ def load_frames_from_glob(patterns):
 
 
 def _evenly_pick(seq, k):
+	"""在 seq 中均匀取 k 个元素（用于抽帧）。"""
 	if k <= 0 or not seq:
 		return []
 	n = len(seq)
@@ -170,6 +237,10 @@ def _evenly_pick(seq, k):
 
 
 def select_frames_start_middle_end(frames, start_count, middle_count, end_count):
+	"""从帧序列的前 1/3、中 1/3、后 1/3 分段抽样。
+
+	目的：避免只取中段导致动作变化不明显。
+	"""
 	frames = list(frames or [])
 	n = len(frames)
 	if n == 0:
@@ -195,6 +266,8 @@ def select_frames_start_middle_end(frames, start_count, middle_count, end_count)
 
 
 class Obstacle:
+	"""障碍物：地面或空中（飞行）两种类型。"""
+
 	def __init__(self, x, kind='ground', image=None):
 		self.x = x
 		self.kind = kind
@@ -210,6 +283,7 @@ class Obstacle:
 			self.y = GROUND_Y - random.randint(80, 130)
 
 	def rect(self):
+		"""障碍物碰撞盒（比显示略小一点，减少背景导致误碰）。"""
 		pad = 6
 		if self.kind == 'ground':
 			return pygame.Rect(self.x + pad, GROUND_Y - self.h + pad, self.w - pad * 2, self.h - pad * 2)
@@ -217,19 +291,31 @@ class Obstacle:
 			return pygame.Rect(self.x + pad, self.y - self.h + pad, self.w - pad * 2, self.h - pad * 2)
 
 	def update(self, speed, dt):
+		"""按当前速度向左移动（speed: px/s, dt: s）。"""
 		self.x -= speed * dt
 
 
 def run():
+	"""
+	启动恐龙小游戏。
+	这是一个阻塞函数，会运行 pygame 主循环；窗口关闭/退出后函数才会返回。
+
+	按键：
+	- 空格 / 上箭头：跳跃
+	- S：蹲下（可在空中触发，用于“空中蹲下更高”的姿态展示）
+	- R：Game Over 后重新开始
+	- Esc：退出
+	"""
 	pygame.init()
 	screen = pygame.display.set_mode((WIDTH, HEIGHT))
 	clock = pygame.time.Clock()
 	font = pygame.font.SysFont(None, 28)
 
 	# load assets (best-effort)
-	assets = {}
+	assets = {}  # 资源字典：动画/贴图
 	base = os.path.join('assets', 'dinosaur')
 	def try_load(path):
+		"""尝试加载单张图片（失败返回 None）。"""
 		try:
 			return pygame.image.load(path).convert_alpha()
 		except Exception:
@@ -244,7 +330,7 @@ def run():
 		if os.path.exists(gif_path):
 			run_frames, run_fps = load_frames_from_file(gif_path, default_fps=12)
 	# if too many frames, sample from start/middle/end to preserve visible changes
-	max_frames = 30
+	max_frames = MAX_RUN_FRAMES
 	if len(run_frames) > max_frames:
 		base_count = max_frames // 3
 		start_count = base_count
@@ -268,20 +354,23 @@ def run():
 
 	# music removed by request
 
-	dino = Dino()
-	obstacles = []
-	spawn_timer = 0.0
-	speed = 360
-	score = 0
-	running = True
-	game_over = False
-	game_over_time = None
-	death_count = 0
+	dino = Dino()  # 玩家
+	obstacles: list[Obstacle] = []  # 当前屏幕上的障碍物
+	spawn_timer = 0.0  # 距离下次生成障碍的倒计时（秒）
+
+	speed_base = SPEED_BASE  # 基础速度（px/s）
+	speed = speed_base  # 实时速度（会随分数增长）
+	score = 0.0  # 分数（随时间增加）
+
+	running = True  # 主循环开关
+	game_over = False  # 是否进入 Game Over
+	game_over_time: Optional[int] = None  # Game Over 开始的时间戳（ms）
+	death_count = 0  # 本次启动过程中的死亡次数
 
 	last_spawn_type = None
 
 	while running:
-		dt = clock.tick(60) / 1000.0
+		dt = clock.tick(TARGET_FPS) / 1000.0
 		for event in pygame.event.get():
 			if event.type == pygame.QUIT:
 				running = False
@@ -297,9 +386,13 @@ def run():
 					dino.crouch(False)
 
 		if not game_over:
+			# speed ramps up with score to increase pacing
+			speed = speed_base + int(score) * SPEED_PER_SCORE
 			spawn_timer -= dt
 			if spawn_timer <= 0:
-				spawn_timer = random.uniform(0.9, 1.6)
+				# spawn faster over time, clamped to keep it playable
+				factor = max(SPAWN_FACTOR_MIN, 1.0 - (score * SPAWN_FACTOR_PER_SCORE))
+				spawn_timer = random.uniform(SPAWN_INTERVAL_MIN * factor, SPAWN_INTERVAL_MAX * factor)
 				# decide ground or flying, avoid repeating same type
 				if last_spawn_type == 'ground':
 					kind = 'flying' if random.random() < 0.75 else 'ground'
@@ -330,7 +423,7 @@ def run():
 			score += dt * 10
 
 		# draw
-		screen.fill((240, 240, 240))
+		screen.fill((255, 255, 255))
 		pygame.draw.line(screen, (0, 0, 0), (0, GROUND_Y + 1), (WIDTH, GROUND_Y + 1), 2)
 
 		# draw obstacles with images when available
@@ -357,22 +450,27 @@ def run():
 		else:
 			# base body
 			pygame.draw.rect(screen, (40, 40, 40), dino.rect())
-			# run animation frames if available and on ground
+			# priority: crouch > jump > run
 			run_anim = assets.get('run_anim')
-			if not dino.jumping and not dino.crouching and run_anim:
-				run_anim.update(dt)
-				frame = run_anim.current()
-				if frame is not None:
-					f = pygame.transform.smoothscale(frame, (dino.width, int(dino.current_height)))
-					fr = f.get_rect()
-					fr.midbottom = (dino.x + dino.width // 2, dino.y)
-					screen.blit(f, fr)
-			else:
+			jump_anim = assets.get('jump_anim')
+			crouch_anim = assets.get('crouch_anim')
+
+			if dino.crouching and crouch_anim:
+				crouch_anim.update(dt)
+				c = crouch_anim.current()
+				if c is not None:
+					c = pygame.transform.smoothscale(c, (dino.width, int(dino.current_height)))
+					cr = c.get_rect()
+					# when crouching in air, draw slightly higher than the jump pose
+					y_offset = AIR_CROUCH_Y_OFFSET if dino.jumping else 0
+					cr.midbottom = (dino.x + dino.width // 2, dino.y - y_offset)
+					screen.blit(c, cr)
+				# reset other animations when crouch is active
+				if jump_anim:
+					jump_anim.reset()
 				if run_anim:
 					run_anim.reset()
-			# jumping overlay
-			jump_anim = assets.get('jump_anim')
-			if dino.jumping and jump_anim:
+			elif dino.jumping and jump_anim:
 				jump_anim.update(dt)
 				j = jump_anim.current()
 				if j is not None:
@@ -380,20 +478,21 @@ def run():
 					jr = j.get_rect()
 					jr.midbottom = (dino.x + dino.width // 2, dino.y)
 					screen.blit(j, jr)
+				if run_anim:
+					run_anim.reset()
+				if crouch_anim:
+					crouch_anim.reset()
 			else:
+				if run_anim:
+					run_anim.update(dt)
+					frame = run_anim.current()
+					if frame is not None:
+						f = pygame.transform.smoothscale(frame, (dino.width, int(dino.current_height)))
+						fr = f.get_rect()
+						fr.midbottom = (dino.x + dino.width // 2, dino.y)
+						screen.blit(f, fr)
 				if jump_anim:
 					jump_anim.reset()
-			# crouch overlay
-			crouch_anim = assets.get('crouch_anim')
-			if dino.crouching and crouch_anim:
-				crouch_anim.update(dt)
-				c = crouch_anim.current()
-				if c is not None:
-					c = pygame.transform.smoothscale(c, (dino.width, int(dino.current_height)))
-					cr = c.get_rect()
-					cr.midbottom = (dino.x + dino.width // 2, dino.y)
-					screen.blit(c, cr)
-			else:
 				if crouch_anim:
 					crouch_anim.reset()
 
@@ -404,12 +503,15 @@ def run():
 
 		# when game over, show overlay and handle restart/auto-exit
 		if game_over:
-			go_text = font.render("GAME OVER - Press Space to restart or wait 5s", True, (200, 0, 0))
+			go_text = font.render("GAME OVER - Press R to restart or wait 5s", True, (200, 0, 0))
 			go_rect = go_text.get_rect(center=(WIDTH // 2, HEIGHT // 2))
 			screen.blit(go_text, go_rect)
 			pygame.display.flip()
 
 			now = pygame.time.get_ticks()
+			# type guard: game_over_time may be None in type checker's view
+			if game_over_time is None:
+				game_over_time = now
 			if now - game_over_time >= 5000:
 				running = False
 				break
@@ -419,7 +521,7 @@ def run():
 					running = False
 					break
 				elif event.type == pygame.KEYDOWN:
-					if event.key == pygame.K_SPACE:
+					if event.key == pygame.K_r:
 						# restart but keep death_count
 						dino = Dino()
 						obstacles = []

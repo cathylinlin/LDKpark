@@ -19,6 +19,24 @@ dist/
 # pytest
 .pytest_cache/
 
+# coverage
+.coverage
+coverage.xml
+htmlcov/
+
+# type checker / linter caches
+.mypy_cache/
+.ruff_cache/
+
+# tox
+.tox/
+
+# logs
+*.log
+
 # OS files
 .DS_Store
 thumbs.db
+
+#sciptes
+.scripts/
