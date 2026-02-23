@@ -1,22 +1,22 @@
 {
   "sprites": {
     "idle": { "type": "sheet", "file": "sheets/idle_sheet.png", "frame_width": 64, "frame_height": 64, "fps": 6 },
-    "run": { "type": "sheet", "file": "sheets/run_sheet.png", "frame_width": 64, "frame_height": 64, "fps": 12 },
-    "jump_up": { "type": "frames", "prefix": "frames/jump_up_", "count": 3, "frame_width": 64, "frame_height": 64, "fps": 10 },
+    "run": { "type": "gif", "file": "sheets/taff-begining.gif", "frame_width": 64, "frame_height": 64, "fps": 12 },
+    "jump": { "type": "image", "file": "sheets/mdtaff.jpg", "frame_width": 64, "frame_height": 64, "fps": 10 },
+    "crouch": { "type": "image", "file": "face/taff-laugh.jpg", "frame_width": 64, "frame_height": 64, "fps": 8 },
     "fall": { "type": "frames", "prefix": "frames/fall_", "count": 2, "frame_width": 64, "frame_height": 64, "fps": 10 },
     "die": { "type": "sheet", "file": "sheets/die_sheet.png", "frame_width": 64, "frame_height": 64, "fps": 8 }
   },
   "expressions": {
-    "normal": "face/face_normal.png",
-    "happy": "face/face_happy.png",
-    "hurt": "face/face_hurt.png",
-    "surprised": "face/face_surprised.png"
+    "normal": "face/taff-crying.jpg",
+    "laugh": "face/taff-laugh.jpg"
   },
   "sfx": {
+    "music": "sfx/taff-begining.track-0.m4a",
     "jump": "sfx/jump.wav",
     "land": "sfx/land.wav",
     "die": "sfx/die.wav"
   },
   "anchor": { "x": 32, "y": 56 },
-  "notes": "frame sizes are example values; update frame_width/frame_height to match your assets"
+  "notes": "frame sizes are example values; update frame_width/frame_height to match your assets. run uses a gif; jump uses mdtaff.jpg; crouch uses taff-laugh.jpg. obstacles in obstacles/ and flying items in flying/."
 }
