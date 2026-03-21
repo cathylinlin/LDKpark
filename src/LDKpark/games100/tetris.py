@@ -58,6 +58,7 @@ class TetrisApp:
         self.game_over = False
         self.paused = False
         self.is_running = False
+        self.game_loop_id = None
         
         # 键位设置 (默认键位)
         self.keys = {
@@ -154,6 +155,11 @@ class TetrisApp:
 
     def start_game(self):
         """开始/重新开始游戏"""
+        # 取消之前的游戏循环
+        if self.game_loop_id:
+            self.root.after_cancel(self.game_loop_id)
+            self.game_loop_id = None
+        
         self.board = [[None for _ in range(self.cols)] for _ in range(self.rows)]
         self.score = 0
         self.level = 1
@@ -193,7 +199,7 @@ class TetrisApp:
                     return
         
         speed = max(50, 500 - (self.level - 1) * 50)
-        self.root.after(speed, self.run_game_loop)
+        self.game_loop_id = self.root.after(speed, self.run_game_loop)
 
     def spawn_shape(self):
         """生成新方块"""
@@ -482,3 +488,4 @@ def close():
         except:
             pass
         _root = None
+
